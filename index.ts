@@ -1,24 +1,11 @@
-import './style.css';
+import { timer, throwError, Observable, Subject, BehaviorSubject } from 'rxjs';
 
 import {
-  of,
   map,
-  timer,
-  throwError,
-  lastValueFrom,
-  Observable,
-  Subject,
-  interval,
-} from 'rxjs';
-
-import {
   catchError,
   concatMap,
-  delay,
   filter,
-  last,
   mergeMap,
-  repeat,
   switchMap,
   take,
   takeWhile,
@@ -26,273 +13,338 @@ import {
 } from 'rxjs/operators';
 import { ajax } from 'rxjs/ajax';
 
+enum PollingResult {
+  Error = 'Error',
+  Completed = 'Completed',
+}
+
+enum ApplyChangeResponse {
+  Succeed = 'Succeed',
+  Failed = 'Failed',
+  SucceedWithPendingId = 'Succeed with pending id',
+}
+
+enum PollingResponse {
+  Pending = 'Pending',
+  Succeed = 'Succeed',
+  Failed = 'Failed',
+}
+
 class ApplyChangeWithPolling {
+  public uiBlocking: BehaviorSubject<boolean> = new BehaviorSubject<boolean>(
+    false
+  );
   private hasPendingPollingRequest: boolean = false;
-  private pendingId: number;
-  private applyChangeResponse = [
-    'succeed',
-    'failed',
-    'succed with pending request',
-    'succed with pending request',
-    'succed with pending request',
-    'succed with pending request',
-    'succed with pending request',
-    'succed with pending request',
-  ];
-  private times: number = 1;
-  private timer$ = timer(0, Math.pow(2, 1) * 100);
-  private pendingChangeResponse = [
-    'pending',
-    'pending',
-    'pending',
-    'pending',
-    'pending',
-    'pending',
-    'succeed',
-    'failed',
-  ];
-  public uiBlocking: Subject<boolean> = new Subject<boolean>();
-  private pollingValue$: Subject<string> = new Subject<string>();
+  private pendingId: string;
+  private exponentTimes: number = 1;
+  private pollingInterval$: Subject<string> = new Subject<string>();
   private needsPolling: boolean = true;
+  private pollingResult: Promise<PollingResult>;
+  private applyChangeResponse = [
+    ApplyChangeResponse.Succeed,
+    ApplyChangeResponse.Failed,
+    ApplyChangeResponse.SucceedWithPendingId,
+    ApplyChangeResponse.SucceedWithPendingId,
+    ApplyChangeResponse.SucceedWithPendingId,
+    ApplyChangeResponse.SucceedWithPendingId,
+    ApplyChangeResponse.SucceedWithPendingId,
+    ApplyChangeResponse.SucceedWithPendingId,
+  ];
+  private pendingChangeResponse = [
+    PollingResponse.Pending,
+    PollingResponse.Pending,
+    PollingResponse.Pending,
+    PollingResponse.Pending,
+    PollingResponse.Pending,
+    PollingResponse.Pending,
+    PollingResponse.Succeed,
+    PollingResponse.Failed,
+  ];
 
   constructor() {}
 
-  private exponentialTimeBackOff(): void {
-    setTimeout(() => {
-      console.log('delay time', this.delayTime());
-      this.pollingValue$.next('next');
-      if (this.needsPolling) {
-        this.times = this.times + 1;
-        this.exponentialTimeBackOff();
-      } else {
-        console.log('complete polling');
-        this.pollingValue$.complete();
+  public async callApplyChangeWithPolling(timeInterval: number): Promise<any> {
+    logMessage('Start UI Block');
+    this.uiBlocking.next(true);
+
+    if (this.hasPendingPollingRequest) {
+      // await for pendingRequest complete
+      const result = await this.pollingResult;
+      logMessage(`The previous pending polling request result: ${result}`);
+      if (result === PollingResult.Error) {
+        logMessage('Stop UI Block');
+        this.uiBlocking.next(false);
+        return;
       }
-    }, this.delayTime());
+    }
+    return this.callApplyChange(timeInterval);
   }
 
-  private delayTime(): number {
-    return Math.pow(2, this.times) * 100;
-  }
-
-  public async callApplyChangeWithPolling(): Promise<void> {
-    console.log('has pending polling requests', this.hasPendingPollingRequest);
-    const poll1 = await lastValueFrom(this.pollingRequest$);
-    console.log('poll1 result', poll1);
-    //const poll2 = await lastValueFrom(this.pollingRequest$);
-    // if (this.hasPendingPollingRequest) {
-    //   // await for pendingRequest complete
-    //   return lastValueFrom(this.callApplyChange());
-    // }
-    // return lastValueFrom(this.callApplyChange());
-  }
-
-  private applyChange$ = this.applyChangeRequest().pipe(
-    map((val) => {
-      console.log(`apply change ${val[0]}`);
-      console.log('Stop UI Block');
-      this.uiBlocking.next(false);
-
-      if (val[0] === 'succeed') {
-        console.log('update model version number');
-      } else if (val[0] === 'succed with pending request') {
-        console.log('save the current data model state');
-        this.pendingId = val[1] as number;
-      }
-      console.log('update UI with new model state');
-      return val;
-    }),
-    catchError((val) => {
-      this.uiBlocking.next(false);
-      console.log('apply change failed');
-      console.log('Stop UI Block');
-      console.log('Apply change error andling');
-      console.log('Roll back UI with last good state');
-      return val;
-    })
-  );
-
-  private callPollingRequest(): Observable<string> {
-    this.exponentialTimeBackOff();
-    return this.pollingValue$.pipe(
-      // tap((timer) => {
-      //   console.log(timer);
-      //   this.times = this.times + 1;
-      // }),
-      mergeMap(() =>
-        // sending our request parellely
-        this.pendingChangeRequest().pipe(
-          tap((v) => console.log('pending result value', v)),
-          map((val) => val),
-          catchError((error) => of(error))
-        )
-      ),
-      takeWhile((val) => {
-        return val === 'pending';
-      }, true),
-      last(),
-      tap((val) => {
-        this.needsPolling = false;
-        console.log('pending change request', val);
-      }),
+  private getApplyChange() {
+    return this.applyChangeRequest().pipe(
       map((val) => {
-        this.hasPendingPollingRequest = false;
-        if (val === 'failed') {
-          this.uiBlocking.next(false);
-          console.log('notification: previous changes are failed in service');
-          console.log('UI roll back to previously saved data model state');
-          return 'polling apply change failed';
-        } else {
-          return 'polling apply change succeed';
+        logMessage(`apply change response: ${val[0]}`);
+        logMessage('Stop UI Block');
+        this.uiBlocking.next(false);
+
+        if (val[0] === ApplyChangeResponse.Succeed) {
+          logMessage('update model version number');
+        } else if (val[0] === ApplyChangeResponse.SucceedWithPendingId) {
+          logMessage('save the current data model state');
+          this.pendingId = val[1];
         }
+        logMessage('update UI with new model state');
+        return val;
+      }),
+      catchError((val) => {
+        this.uiBlocking.next(false);
+        logMessage('apply change failed');
+        logMessage('Stop UI Block');
+        logMessage('Apply change error andling');
+        logMessage('Roll back UI with last good state');
+        return val;
       })
     );
   }
 
-  private pollingRequest$ = this.timer$.pipe(
-    mergeMap(() =>
-      // sending our request parellely
-      this.pendingChangeRequest().pipe(
-        tap((v) => console.log('pending change request result value', v)),
-        map((val) => val),
-        catchError((error) => of(error))
-      )
-    ),
-    tap((val) => console.log('pending change request', val)),
-    takeWhile((val) => {
-      return val === 'pending';
-    }, true),
-    tap((val) => {
-      this.needsPolling = false;
-    }),
-    filter((v) => v !== 'pending'),
-    map((val) => {
-      this.hasPendingPollingRequest = false;
-      if (val === 'failed') {
-        this.uiBlocking.next(false);
-        console.log('notification: previous changes are failed in service');
-        console.log('UI roll back to previously saved data model state');
-        return 'polling apply change failed';
-      } else {
-        return 'polling apply change succeed';
-      }
-    })
-  );
-
-  private callApplyChange() {
-    console.log('Start UI Block');
-    this.uiBlocking.next(true);
-    return this.applyChange$.pipe(
-      filter((val) => val[0] === 'succed with pending request'),
-      tap(() => {
-        this.hasPendingPollingRequest = true;
-        this.needsPolling = true;
+  public pollingRequestWithExponentialBackOff(
+    timeInterval: number
+  ): Observable<string> {
+    this.needsPolling = true;
+    this.pollingInterval$ = new Subject<string>();
+    this.exponentialTimeBackOff(timeInterval);
+    return this.pollingInterval$.pipe(
+      mergeMap((v) => {
+        logMessage('timer value', v);
+        return this.pendingChangeRequest();
       }),
-      take(1),
-      concatMap((val) => this.callPollingRequest())
+      catchError((error) => {
+        this.hasPendingPollingRequest = false;
+        this.needsPolling = false;
+        logMessage('polling request result: ', error);
+        logMessage('notification: previous changes are failed in service');
+        logMessage('UI roll back to previously saved data model state');
+        return throwError(error);
+      }),
+      takeWhile((val) => {
+        return val === PollingResponse.Pending;
+      }, true),
+      tap((v) => logMessage('polling request result: ', v)),
+      filter((v) => v !== PollingResponse.Pending),
+      map((val) => {
+        this.needsPolling = false;
+        this.hasPendingPollingRequest = false;
+        logMessage('polling request succeed');
+        return 'polling apply change succeed';
+      })
     );
   }
 
-  private getRandomInt(max) {
+  public pollingRequestConcurrently(timeInterval: number = 1000) {
+    return timer(0, timeInterval).pipe(
+      mergeMap((v) => {
+        logMessage('timer value: ', v);
+        return this.pendingChangeRequest();
+      }),
+      catchError((error) => {
+        this.hasPendingPollingRequest = false;
+        logMessage('polling request result: ', error);
+        logMessage('notification: previous changes are failed in service');
+        logMessage('UI roll back to previously saved data model state');
+        return throwError(error);
+      }),
+      takeWhile((val) => {
+        return val === PollingResponse.Pending;
+      }, true),
+      tap((v) => logMessage('polling request result: ', v)),
+      filter((v) => v !== PollingResponse.Pending),
+      map((val) => {
+        this.hasPendingPollingRequest = false;
+        logMessage('polling request succeed');
+        return 'polling apply change succeed';
+      })
+    );
+  }
+
+  public pollingRequestSequentially(timeInterval: number) {
+    return timer(0, timeInterval).pipe(
+      concatMap((v) => {
+        logMessage('timer value', v);
+        return this.pendingChangeRequest();
+      }),
+      catchError((error) => {
+        this.hasPendingPollingRequest = false;
+        logMessage('polling request result: ', error);
+        logMessage('notification: previous changes are failed in service');
+        logMessage('UI roll back to previously saved data model state');
+        return throwError(error);
+      }),
+      takeWhile((val) => {
+        return val === PollingResponse.Pending;
+      }, true),
+      tap((v) => logMessage('polling request result: ', v)),
+      filter((v) => v !== PollingResponse.Pending),
+      map((val) => {
+        this.hasPendingPollingRequest = false;
+        logMessage('polling request succeed');
+        return 'polling apply change succeed';
+      })
+    );
+  }
+
+  private callApplyChange(timeInterval: number) {
+    this.pollingResult = new Promise((resolve, reject) => {
+      this.getApplyChange()
+        .pipe(
+          tap((val: any[]) => {
+            if (val[0] !== ApplyChangeResponse.SucceedWithPendingId) {
+              resolve(PollingResult.Completed);
+            }
+          }),
+          filter(
+            (val: any[]) => val[0] === ApplyChangeResponse.SucceedWithPendingId
+          ),
+          tap(() => {
+            this.hasPendingPollingRequest = true;
+            this.needsPolling = true;
+          }),
+          take(1),
+          concatMap((val) => this.pollingRequestConcurrently(timeInterval))
+        )
+        .subscribe(
+          (v) => {
+            logMessage('promise value: ', v);
+          },
+          (error) => {
+            logMessage('promise error');
+            resolve(PollingResult.Error);
+          },
+          () => {
+            logMessage('promise completed');
+            resolve(PollingResult.Completed);
+          }
+        );
+    });
+    return this.pollingResult;
+  }
+
+  private getRandomInt(max: number) {
     return Math.floor(Math.random() * max);
   }
 
   private applyChangeRequest() {
     const index = this.getRandomInt(this.applyChangeResponse.length);
-    if (index === 1) {
-      return ajax('https://jsonplaceholder.typicode.com/todos/1').pipe(
-        switchMap(() => throwError([this.applyChangeResponse[index], index]))
+    const pendingRequestId = createUUID();
+    if (this.applyChangeResponse[index] === ApplyChangeResponse.Failed) {
+      return ajax('https://jsonplaceholder.typicode.com/posts/1/comments').pipe(
+        switchMap(() =>
+          throwError([this.applyChangeResponse[index], pendingRequestId])
+        )
       );
-
-      // throwError([this.applyChangeResponse[index], index]).pipe(
-      //   delay(2000)
-      // );
     }
-    return ajax('https://jsonplaceholder.typicode.com/todos/1').pipe(
-      map((v) => [this.applyChangeResponse[index], index])
+    return ajax('https://jsonplaceholder.typicode.com/posts/1/comments').pipe(
+      map((v) => [this.applyChangeResponse[index], pendingRequestId])
     );
-    // of([this.applyChangeResponse[index], index]).pipe(delay(2000));
   }
 
   private pendingChangeRequest() {
-    console.log('pendingRequestId', this.pendingId);
+    logMessage('pendingRequestId', this.pendingId);
     const index = this.getRandomInt(this.pendingChangeResponse.length);
-    if (index === 5) {
-      return throwError(this.pendingChangeResponse[index]).pipe(delay(2000));
+    if (this.pendingChangeResponse[index] === PollingResponse.Failed) {
+      return ajax('https://jsonplaceholder.typicode.com/posts/1/comments').pipe(
+        switchMap(() => throwError(this.pendingChangeResponse[index]))
+      );
     }
-    return of(this.pendingChangeResponse[index]).pipe(delay(2000));
+    return ajax('https://jsonplaceholder.typicode.com/posts/1/comments').pipe(
+      map((v) => this.pendingChangeResponse[index])
+    );
+  }
+
+  private exponentialTimeBackOff(timeInterval: number): void {
+    setTimeout(() => {
+      logMessage('delay time', this.delayTime(timeInterval));
+      this.pollingInterval$.next('next');
+      if (this.needsPolling) {
+        this.exponentTimes = this.exponentTimes + 1;
+        this.exponentialTimeBackOff(timeInterval);
+      } else {
+        logMessage('complete polling');
+        this.pollingInterval$.complete();
+      }
+    }, this.delayTime(timeInterval));
+  }
+
+  private delayTime(timeInterval: number): number {
+    return Math.pow(2, this.exponentTimes) * timeInterval;
   }
 }
 
-async function callPendingChange() {
-  const example = new ApplyChangeWithPolling();
-  const result = example.callApplyChangeWithPolling();
-  // console.log('log result');
-  // console.log('result');
-  // console.log(result);
-  // example.uiBlocking.pipe(take(2)).subscribe((v) => {
-  //   console.log('ui blocking value', v);
-  //   if (!v) {
-  //     example.callApplyChangeWithPolling();
-  //   }
-  // });
+const example = new ApplyChangeWithPolling();
+
+const input = document.getElementById('input') as HTMLInputElement;
+let inputValue: number;
+document.addEventListener('input', () => (inputValue = parseInt(input.value)));
+
+const button1 = document.getElementById('button1');
+button1.addEventListener(
+  'click',
+  async () => await example.pollingRequestConcurrently(inputValue).toPromise()
+);
+
+const button2 = document.getElementById('button2');
+button2.addEventListener(
+  'click',
+  async () => await example.pollingRequestSequentially(inputValue).toPromise()
+);
+
+const button3 = document.getElementById('button3');
+button3.addEventListener(
+  'click',
+  async () =>
+    await example.pollingRequestWithExponentialBackOff(inputValue).toPromise()
+);
+
+const button4 = document.getElementById('button4');
+button4.addEventListener(
+  'click',
+  async () => await example.callApplyChangeWithPolling(inputValue)
+);
+
+const ul = document.getElementById('logging');
+const button5 = document.getElementById('button5');
+button5.addEventListener('click', () => (ul.innerHTML = ''));
+
+const spinner = document.getElementById('spinner');
+example.uiBlocking.subscribe((blockUI) => {
+  if (blockUI) {
+    button4.style.display = 'none';
+    spinner.style.display = 'block';
+  } else {
+    button4.style.display = 'block';
+    spinner.style.display = 'none';
+  }
+});
+
+function logMessage(message: string, moreMessage?: string | number): void {
+  const li = document.createElement('li');
+  li.className = 'list-group-item';
+  const id = document.getElementsByClassName('list-group-item').length + 1;
+  const value = `${id}. ${message} ${
+    moreMessage
+      ? moreMessage
+      : typeof moreMessage === 'number'
+      ? moreMessage
+      : ''
+  }`;
+  li.textContent = value;
+  console.log(value);
+  ul.appendChild(li);
 }
 
-callPendingChange();
-
-// const example = new ApplyChangeWithPolling();
-// const result = await example.callApplyChangeWithPolling();
-// console.log('result', result);
-
-// setTimeout(() => {
-//   callPendingChange();
-// }, 4000);
-// console.log(' I start synchronous log ');
-// of(2).subscribe(() => {
-//   console.log('I am middle synchronous log ');
-// });
-// console.log('I end synchronous log ');
-
-// async function tryObservablePromiseExample() {
-//   const result = await of(1, 3, 5)
-//     .pipe(
-//       map((v) => v),
-//       // filter((v) => v % 2 === 0),
-//       map((v) => 'succeed')
-//     )
-//     .toPromise();
-//   console.log(result);
-// }
-
-// tryObservablePromiseExample();
-// let times = 1;
-// function delayTime() {
-//   return Math.pow(2, times) * 100;
-// }
-// timer(0, delayTime())
-//   .pipe(
-//     tap((v) => (times = times + 1)),
-//     take(10)
-//   )
-//   .subscribe((timer) => {
-//     console.log('times', times);
-//     console.log(timer);
-//   });
-
-// interval(1000)
-//   .pipe(
-//     delay(3000),
-//     tap((v) => (times = times + 1)),
-//     take(10)
-//   )
-//   .subscribe((timer) => console.log(timer));
-
-const value$ = of(1);
-lastValueFrom(value$);
-
-// of(1, 3, 4, 5)
-//   .pipe(
-//     takeWhile((v) => v % 2 !== 0, true),
-//     tap((v) => console.log(v))
-//   )
-//   .subscribe((v) => console.log(v));
+function createUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    var r = (Math.random() * 16) | 0,
+      v = c == 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}

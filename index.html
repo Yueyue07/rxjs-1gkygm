@@ -1,144 +1,85 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RxJS Playground</title>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>RxJS Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.1/dist/css/bootstrap.min.css" integrity="sha384-F3w7mX95PdgyTmZZMECAngseQB83DfGTowi0iMjiWaeVhAn4FJkqJByhZMI3AhiU" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.1/dist/js/bootstrap.min.js" integrity="sha384-skAcpIdS7UcVUC05LJ9Dxay8AXcDYfBJqt1CJ85S/CFujBsIzCIv+l9liuYLaMQ/" crossorigin="anonymous"></script>
+    <style>
+        body { font-family: 'Arial'; background: lightgray}
+        ul { list-style-type: none; padding: 20px; }
+        li { padding: 15px; background: lightcoral; margin-bottom: 10px; }
+        .container {
+            display: flex; 
+            flex-direction: column; 
+            margin: 20px;
+        }
+        .content {
+            display: flex;
+        }
+        .content label {
+            margin-right: 20px;
+        }
+        .content button {
+            margin-bottom: 20px; 
+            width: 120px;
+            white-space: nowrap;
+        }
+        .list-group-item {
+            background: none !important;
+            border: none !important;
+            padding: 1px !important;
+            margin: 0 !important;
+        }
+    </style>
 </head>
-
 <body>
-  <header>
-    <img src="https://rxjs.dev/generated/images/marketing/home/Rx_Logo-512-512.png" class="logo"/>
-    <h1>RxJS Playground</h1>
-  </header>
-  <article>
-    <h2>Tips:</h2>
-    <ul>
-      <li>Try using <code>interval</code> or <code>timer</code> to create async streams of values to play with</li>
-      <li>Use <code>fromEvent</code> to create a stream of user events. <code>fromEvent(document, 'click')</code> is
-        useful</li>
-      <li>See what's happening between operators by adding a <code>tap(console.log)</code>. for example:
-        <code>source.pipe(map(fn), <span class="callout">tap(console.log)</span>, filter(fn2))</code>
-      </li>
-    </ul>
-  </article>
-  <article>
-    <h2>Recipes:</h2>
-    <p>Below are a few recipes to try out to play with RxJS</p>
+    <h1>RxJS Polling Request Demo</h1>
+    <section class="container">
+        <section class="content">
+            <label>time interval:</label>
+            <input type="text" id="input" placeholder="1000"/> ms
+        </section>
+    </section>
+    <section class="container">
+        <h2>
+            Different ways of sending the polling requests to the back-end:
+        </h2>
+        <section class="content">
+            <label>1. Concurrent polling requests:</label>
+            <button id="button1" ">click</button>
+        </section>
+        <section class="content">
+            <label>2. Sequential polling requests:</label>
+            <button id="button2">click</button>
+        </section>
+        <section class="content">
+            <label>3. Polling request with exponential backoff:</label>
+            <button id="button3">click</button>
+        </section>
+        <p>Note: Open network section from browser to review the waterfall diagram of the requests.</p>
+    </section>
+    <section class="container">
+        <h2>Mock apply change request with polling the backend</h2>
+        <section class="content" id="applyChange" style="flex-direction: row;">
+            <div class="spinner-grow" role="status" id="spinner">
+            </div>
+            <button id="button4">click</button>
+        </section>
+    </section>
+    <section class="container">
+        <h2>Logging</h2>
+        <section class="content">
+            <label>logging message</label>
+            <button id="button5">clear message</button>
+        </section>
+        <ul id="logging" class="list-group list-group-flush">
 
-    <section>
-      <h3>Basic Clock</h3>
-      <pre>
-import { map, timer } from 'rxjs';
-
-const output = document.createElement('output');
-document.body.prepend(output);
-
-timer(0, 1000)
-  .pipe(map(() => new Date().toLocaleTimeString()))
-  .subscribe(time => (output.textContent = time));
-      </pre>
+        </ul>
     </section>
 
-    <section>
-      <h3>Movable Element</h3>
-      <pre>
-import { fromEvent, exhaustMap, takeUntil } from 'rxjs';
-
-const target = document.createElement('div');
-target.setAttribute(
-  'style',
-  'position: absolute; top: 0; left: 0; background-color: red; width: 50px; height: 50px;'
-);
-document.body.append(target);
-
-fromEvent(target, 'mousedown')
-  .pipe(
-    exhaustMap(() =>
-      fromEvent(document, 'mousemove').pipe(
-        takeUntil(fromEvent(document, 'mouseup'))
-      )
-    )
-  )
-  .subscribe(({ pageX, pageY }: MouseEvent) => {
-    target.style.transform = `translate3d(${pageX}px, ${pageY}px, 0)`;
-  });
-      </pre>
-    </section>
-
-    <section>
-      <h3>Animated Dot Trail</h3>
-      <pre>
-import {
-  defer,
-  fromEvent,
-  animationFrames,
-  mergeMap,
-  tap,
-  takeWhile,
-  scan,
-  finalize
-} from 'rxjs';
-
-// When the mouse moves, add animated dots to the screen.
-fromEvent(document, 'mousemove')
-  .pipe(mergeMap((e: MouseEvent) => addDot(e.pageX, e.pageY)))
-  .subscribe();
-
-function addDot(x: number, y: number) {
-  return defer(() => {
-    // Create and add the dot element when
-    // the observable is subscribed to
-    const dot = document.createElement('div');
-    dot.setAttribute(
-      'style',
-      `
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 10px;
-        height: 10px;
-        background-color: lime;
-        border-radius: 50%;
-        transform: translate3d(${x}px, ${y}px, 0);
-      `
-    );
-    document.body.append(dot);
-
-    const xVelocity = Math.random() * 2 - 1;
-    const yVelocity = Math.random() * 2 - 1;
-
-    return animationFrames().pipe(
-      // Only take animation frames for 1 second.
-      takeWhile(({ elapsed }) => elapsed < 1000),
-
-      // Track and update the current position.
-      scan(
-        ({ x: xCurrent, y: yCurrent }) => ({
-          x: xCurrent + xVelocity,
-          y: yCurrent + yVelocity
-        }),
-        { x, y }
-      ),
-
-      // Set the position on the dot as a side-effect.
-      tap(({ x, y }) => {
-        dot.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-      }),
-
-      // When we clean up, remove the element.
-      finalize(() => {
-        dot.remove();
-      })
-    );
-  });
-}
-      
-      </pre>
-    </section>
-  </article>
+    <script src="/bundle.js"></script>
 </body>
-
 </html>
