@@ -63,10 +63,23 @@
     </section>
     <section class="container">
         <h2>Mock apply change request with polling the backend</h2>
-        <section class="content" id="applyChange" style="flex-direction: row;">
-            <div class="spinner-grow" role="status" id="spinner">
+        <select id="selection" style="width: 400px; margin-bottom: 20px;">
+            <option value="sequential">
+                Polling request sequentially
+            </option>
+            <option value="concurrent">
+                Polling request concurrently
+            </option>
+        </select>
+        <section class="content" id="sequential-section" style="flex-direction: row;">
+            <div class="spinner-grow spinner" role="status">
             </div>
-            <button id="button4">click</button>
+            <button id="button4" style="width: 400px">click to run the polling request sequentially</button>
+        </section>
+        <section class="content" id="concurrent-section" style="flex-direction: row; display: none;">
+            <div class="spinner-grow spinner" role="status">
+            </div>
+            <button id="button6" style="width: 400px;">click to run the polling request concurrently more more </button>
         </section>
     </section>
     <section class="container">

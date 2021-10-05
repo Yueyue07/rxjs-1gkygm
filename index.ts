@@ -1,4 +1,12 @@
-import { timer, throwError, Observable, Subject, BehaviorSubject } from 'rxjs';
+import {
+  timer,
+  throwError,
+  Observable,
+  Subject,
+  BehaviorSubject,
+  interval,
+  iif,
+} from 'rxjs';
 
 import {
   map,
@@ -10,6 +18,7 @@ import {
   take,
   takeWhile,
   tap,
+  delay,
 } from 'rxjs/operators';
 import { ajax } from 'rxjs/ajax';
 
@@ -54,16 +63,16 @@ class ApplyChangeWithPolling {
     PollingResponse.Pending,
     PollingResponse.Pending,
     PollingResponse.Pending,
-    PollingResponse.Pending,
-    PollingResponse.Pending,
-    PollingResponse.Pending,
     PollingResponse.Succeed,
     PollingResponse.Failed,
   ];
 
   constructor() {}
 
-  public async callApplyChangeWithPolling(timeInterval: number): Promise<any> {
+  public async callApplyChangeWithPolling(
+    timeInterval: number = 1000,
+    isPollingSequentially: boolean = true
+  ): Promise<any> {
     logMessage('Start UI Block');
     this.uiBlocking.next(true);
 
@@ -77,7 +86,7 @@ class ApplyChangeWithPolling {
         return;
       }
     }
-    return this.callApplyChange(timeInterval);
+    return this.callApplyChange(timeInterval, isPollingSequentially);
   }
 
   private getApplyChange() {
@@ -140,12 +149,12 @@ class ApplyChangeWithPolling {
     );
   }
 
-  public pollingRequestConcurrently(timeInterval: number = 1000) {
+  public pollingRequestConcurrently(timeInterval: number) {
     return timer(0, timeInterval).pipe(
       mergeMap((v) => {
         logMessage('timer value: ', v);
         return this.pendingChangeRequest();
-      }),
+      }, 10),
       catchError((error) => {
         this.hasPendingPollingRequest = false;
         logMessage('polling request result: ', error);
@@ -158,6 +167,7 @@ class ApplyChangeWithPolling {
       }, true),
       tap((v) => logMessage('polling request result: ', v)),
       filter((v) => v !== PollingResponse.Pending),
+      take(1),
       map((val) => {
         this.hasPendingPollingRequest = false;
         logMessage('polling request succeed');
@@ -192,7 +202,10 @@ class ApplyChangeWithPolling {
     );
   }
 
-  private callApplyChange(timeInterval: number) {
+  private callApplyChange(
+    timeInterval: number,
+    isPollingSequentially: boolean = true
+  ) {
     this.pollingResult = new Promise((resolve, reject) => {
       this.getApplyChange()
         .pipe(
@@ -209,7 +222,13 @@ class ApplyChangeWithPolling {
             this.needsPolling = true;
           }),
           take(1),
-          concatMap((val) => this.pollingRequestConcurrently(timeInterval))
+          concatMap((val) =>
+            iif(
+              () => isPollingSequentially,
+              this.pollingRequestSequentially(timeInterval),
+              this.pollingRequestConcurrently(timeInterval)
+            )
+          )
         )
         .subscribe(
           (v) => {
@@ -237,6 +256,7 @@ class ApplyChangeWithPolling {
     const pendingRequestId = createUUID();
     if (this.applyChangeResponse[index] === ApplyChangeResponse.Failed) {
       return ajax('https://jsonplaceholder.typicode.com/posts/1/comments').pipe(
+        delay(3000),
         switchMap(() =>
           throwError([this.applyChangeResponse[index], pendingRequestId])
         )
@@ -252,6 +272,7 @@ class ApplyChangeWithPolling {
     const index = this.getRandomInt(this.pendingChangeResponse.length);
     if (this.pendingChangeResponse[index] === PollingResponse.Failed) {
       return ajax('https://jsonplaceholder.typicode.com/posts/1/comments').pipe(
+        delay(3000),
         switchMap(() => throwError(this.pendingChangeResponse[index]))
       );
     }
@@ -285,43 +306,81 @@ const input = document.getElementById('input') as HTMLInputElement;
 let inputValue: number;
 document.addEventListener('input', () => (inputValue = parseInt(input.value)));
 
+function getTimeInterval() {
+  return inputValue ? inputValue : 1000;
+}
+
 const button1 = document.getElementById('button1');
 button1.addEventListener(
   'click',
-  async () => await example.pollingRequestConcurrently(inputValue).toPromise()
+  async () =>
+    await example.pollingRequestConcurrently(getTimeInterval()).toPromise()
 );
 
 const button2 = document.getElementById('button2');
 button2.addEventListener(
   'click',
-  async () => await example.pollingRequestSequentially(inputValue).toPromise()
+  async () =>
+    await example.pollingRequestSequentially(getTimeInterval()).toPromise()
 );
 
 const button3 = document.getElementById('button3');
 button3.addEventListener(
   'click',
   async () =>
-    await example.pollingRequestWithExponentialBackOff(inputValue).toPromise()
+    await example
+      .pollingRequestWithExponentialBackOff(getTimeInterval())
+      .toPromise()
 );
 
 const button4 = document.getElementById('button4');
 button4.addEventListener(
   'click',
-  async () => await example.callApplyChangeWithPolling(inputValue)
+  async () => await example.callApplyChangeWithPolling(getTimeInterval(), true)
 );
+
+const button6 = document.getElementById('button6');
+button6.addEventListener(
+  'click',
+  async () => await example.callApplyChangeWithPolling(getTimeInterval(), false)
+);
+
+const selection = document.getElementById('selection');
+const sequentialSection = document.getElementById('sequential-section');
+const concurrentSection = document.getElementById('concurrent-section');
+selection.addEventListener('change', (event) => {
+  const value = (event as any).target.value;
+  if (value === 'sequential') {
+    sequentialSection.style.display = 'block';
+    concurrentSection.style.display = 'none';
+  } else if (value === 'concurrent') {
+    sequentialSection.style.display = 'none';
+    concurrentSection.style.display = 'block';
+  }
+});
 
 const ul = document.getElementById('logging');
 const button5 = document.getElementById('button5');
 button5.addEventListener('click', () => (ul.innerHTML = ''));
 
-const spinner = document.getElementById('spinner');
+const spinners = document.querySelectorAll('.spinner');
 example.uiBlocking.subscribe((blockUI) => {
   if (blockUI) {
     button4.style.display = 'none';
-    spinner.style.display = 'block';
+    button4.style.display = 'none';
+    for (let i = 0; i < spinners.length; i++) {
+      (
+        document.getElementsByClassName('spinner')[i] as HTMLElement
+      ).style.display = 'block';
+    }
   } else {
     button4.style.display = 'block';
-    spinner.style.display = 'none';
+    button4.style.display = 'block';
+    for (let i = 0; i < spinners.length; i++) {
+      (
+        document.getElementsByClassName('spinner')[i] as HTMLElement
+      ).style.display = 'none';
+    }
   }
 });
 
