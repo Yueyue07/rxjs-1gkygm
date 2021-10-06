@@ -6,6 +6,7 @@ import {
   BehaviorSubject,
   interval,
   iif,
+  from,
 } from 'rxjs';
 
 import {
@@ -73,6 +74,7 @@ class ApplyChangeWithPolling {
     timeInterval: number = 1000,
     isPollingSequentially: boolean = true
   ): Promise<any> {
+    logMessage('Start applyChange call');
     logMessage('Start UI Block');
     this.uiBlocking.next(true);
 
@@ -154,7 +156,7 @@ class ApplyChangeWithPolling {
       mergeMap((v) => {
         logMessage('timer value: ', v);
         return this.pendingChangeRequest();
-      }, 10),
+      }),
       catchError((error) => {
         this.hasPendingPollingRequest = false;
         logMessage('polling request result: ', error);
@@ -255,30 +257,34 @@ class ApplyChangeWithPolling {
     const index = this.getRandomInt(this.applyChangeResponse.length);
     const pendingRequestId = createUUID();
     if (this.applyChangeResponse[index] === ApplyChangeResponse.Failed) {
-      return ajax('https://jsonplaceholder.typicode.com/posts/1/comments').pipe(
+      return from(
+        fetch('https://jsonplaceholder.typicode.com/posts/1/comments')
+      ).pipe(
         delay(3000),
         switchMap(() =>
           throwError([this.applyChangeResponse[index], pendingRequestId])
         )
       );
     }
-    return ajax('https://jsonplaceholder.typicode.com/posts/1/comments').pipe(
-      map((v) => [this.applyChangeResponse[index], pendingRequestId])
-    );
+    return from(
+      fetch('https://jsonplaceholder.typicode.com/posts/1/comments')
+    ).pipe(map((v) => [this.applyChangeResponse[index], pendingRequestId]));
   }
 
   private pendingChangeRequest() {
     logMessage('pendingRequestId', this.pendingId);
     const index = this.getRandomInt(this.pendingChangeResponse.length);
     if (this.pendingChangeResponse[index] === PollingResponse.Failed) {
-      return ajax('https://jsonplaceholder.typicode.com/posts/1/comments').pipe(
+      return from(
+        fetch('https://jsonplaceholder.typicode.com/posts/1/comments')
+      ).pipe(
         delay(3000),
         switchMap(() => throwError(this.pendingChangeResponse[index]))
       );
     }
-    return ajax('https://jsonplaceholder.typicode.com/posts/1/comments').pipe(
-      map((v) => this.pendingChangeResponse[index])
-    );
+    return from(
+      fetch('https://jsonplaceholder.typicode.com/posts/1/comments')
+    ).pipe(map((v) => this.pendingChangeResponse[index]));
   }
 
   private exponentialTimeBackOff(timeInterval: number): void {
@@ -311,38 +317,28 @@ function getTimeInterval() {
 }
 
 const button1 = document.getElementById('button1');
-button1.addEventListener(
-  'click',
-  async () =>
-    await example.pollingRequestConcurrently(getTimeInterval()).toPromise()
+button1.addEventListener('click', () =>
+  example.pollingRequestConcurrently(getTimeInterval()).subscribe()
 );
 
 const button2 = document.getElementById('button2');
-button2.addEventListener(
-  'click',
-  async () =>
-    await example.pollingRequestSequentially(getTimeInterval()).toPromise()
+button2.addEventListener('click', () =>
+  example.pollingRequestSequentially(getTimeInterval()).subscribe()
 );
 
 const button3 = document.getElementById('button3');
-button3.addEventListener(
-  'click',
-  async () =>
-    await example
-      .pollingRequestWithExponentialBackOff(getTimeInterval())
-      .toPromise()
+button3.addEventListener('click', () =>
+  example.pollingRequestWithExponentialBackOff(getTimeInterval()).subscribe()
 );
 
 const button4 = document.getElementById('button4');
-button4.addEventListener(
-  'click',
-  async () => await example.callApplyChangeWithPolling(getTimeInterval(), true)
+button4.addEventListener('click', () =>
+  example.callApplyChangeWithPolling(getTimeInterval(), true).then()
 );
 
 const button6 = document.getElementById('button6');
-button6.addEventListener(
-  'click',
-  async () => await example.callApplyChangeWithPolling(getTimeInterval(), false)
+button6.addEventListener('click', () =>
+  example.callApplyChangeWithPolling(getTimeInterval(), false).then()
 );
 
 const selection = document.getElementById('selection');
@@ -367,7 +363,7 @@ const spinners = document.querySelectorAll('.spinner');
 example.uiBlocking.subscribe((blockUI) => {
   if (blockUI) {
     button4.style.display = 'none';
-    button4.style.display = 'none';
+    button6.style.display = 'none';
     for (let i = 0; i < spinners.length; i++) {
       (
         document.getElementsByClassName('spinner')[i] as HTMLElement
@@ -375,7 +371,7 @@ example.uiBlocking.subscribe((blockUI) => {
     }
   } else {
     button4.style.display = 'block';
-    button4.style.display = 'block';
+    button6.style.display = 'block';
     for (let i = 0; i < spinners.length; i++) {
       (
         document.getElementsByClassName('spinner')[i] as HTMLElement
